@@ -2,32 +2,14 @@ import os
 import json
 import requests
 import argparse
+from datetime import datetime
 
 CONFIG_FILE = "cloudflare_config.json"
+RULES_FILE = "rules.json"
+BACKUP_DIR = "backups"
 
-# WAF rules to be applied
-WAF_RULES = [
-    {
-        "description": "Good Bots Allow",
-        "expression": '(cf.client.bot) or (cf.verified_bot_category in {"Search Engine Crawler"})',
-        "action": "skip",
-        "action_parameters": {
-            "ruleset": "current",
-            "phases": ["http_request_firewall_managed"],
-            "products": ["waf"]
-        },
-    },
-    {
-        "description": "MC Aggressive Crawlers",
-        "expression": '(http.user_agent contains "yandex") or (http.user_agent contains "ahrefs")',
-        "action": "managed_challenge"
-    },
-    {
-        "description": "Block Web Hosts / WP Paths / TOR",
-        "expression": '(http.request.uri.path contains "xmlrpc") or (ip.src.country in {"T1"})',
-        "action": "block"
-    }
-]
+# Ensure backup directory exists
+os.makedirs(BACKUP_DIR, exist_ok=True)
 
 
 def load_config():
@@ -66,7 +48,7 @@ def list_zones():
     config = load_config()
     url = f"https://api.cloudflare.com/client/v4/zones?account.id={config.get('account_id')}"
     response = make_request(url)
-    
+
     if response.get("success"):
         zones = response["result"]
         for idx, zone in enumerate(zones, start=1):
@@ -81,7 +63,7 @@ def get_ruleset_id(zone_id):
     """Retrieve the ruleset ID for a given zone."""
     url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/rulesets"
     response = make_request(url)
-    
+
     if response.get("success"):
         for ruleset in response["result"]:
             if ruleset["kind"] == "zone" and ruleset["phase"] == "http_request_firewall_custom":
@@ -89,27 +71,80 @@ def get_ruleset_id(zone_id):
     return None
 
 
-def create_ruleset(zone_id):
-    """Create a new WAF ruleset for a zone."""
-    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/rulesets"
-    data = {
-        "name": "Custom WAF Ruleset",
-        "kind": "zone",
-        "phase": "http_request_firewall_custom",
-    }
-    response = make_request(url, method="POST", data=data)
-    return response.get("result", {}).get("id")
+def backup_waf_rules(zone_id):
+    """Backup the current WAF rules for a given zone."""
+    ruleset_id = get_ruleset_id(zone_id)
+    if not ruleset_id:
+        print(f"No existing ruleset found for Zone ID {zone_id}. Skipping backup.")
+        return
+
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/rulesets/{ruleset_id}"
+    response = make_request(url)
+
+    if response.get("success"):
+        backup_path = os.path.join(BACKUP_DIR, f"zone_{zone_id}.json")
+        with open(backup_path, "w") as f:
+            json.dump(response, f, indent=4)
+        print(f"Backup saved: {backup_path}")
+    else:
+        print(f"Failed to backup WAF rules for Zone ID {zone_id}.")
+
+
+def restore_waf_rules(zone_id):
+    """Restore a previous backup of the WAF rules."""
+    backup_path = os.path.join(BACKUP_DIR, f"zone_{zone_id}.json")
+
+    if not os.path.exists(backup_path):
+        print(f"No backup found for Zone ID {zone_id}.")
+        return
+
+    with open(backup_path, "r") as f:
+        backup_data = json.load(f)
+
+    ruleset_id = get_ruleset_id(zone_id)
+    if not ruleset_id:
+        print(f"No existing ruleset found for Zone ID {zone_id}. Cannot restore.")
+        return
+
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/rulesets/{ruleset_id}"
+    response = make_request(url, method="PUT", data={"rules": backup_data.get("result", {}).get("rules", [])})
+
+    if response.get("success"):
+        print(f"Successfully restored WAF rules for Zone ID {zone_id}.")
+    else:
+        print(f"Failed to restore WAF rules for Zone ID {zone_id}: {response.get('errors')}")
+
+
+def load_waf_rules():
+    """Load WAF rules from an external JSON file."""
+    if not os.path.exists(RULES_FILE):
+        print(f"Error: {RULES_FILE} not found. Create it first.")
+        return []
+
+    with open(RULES_FILE, "r") as f:
+        return json.load(f)
 
 
 def apply_waf_rules(zone_id):
     """Apply WAF rules to a specified zone."""
-    ruleset_id = get_ruleset_id(zone_id) or create_ruleset(zone_id)
+    waf_rules = load_waf_rules()
+    if not waf_rules:
+        print("No WAF rules found. Please add rules to rules.json.")
+        return
+
+    backup_waf_rules(zone_id)  # Backup before applying new rules
+
+    ruleset_id = get_ruleset_id(zone_id)
+    if not ruleset_id:
+        print(f"Creating a new ruleset for Zone ID {zone_id}...")
+        ruleset_id = create_ruleset(zone_id)
+
     if not ruleset_id:
         print(f"Failed to create or retrieve ruleset for Zone ID {zone_id}.")
         return
 
     url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/rulesets/{ruleset_id}"
-    data = {"rules": WAF_RULES}
+    data = {"rules": waf_rules}
     response = make_request(url, method="PUT", data=data)
 
     if response.get("success"):
@@ -142,6 +177,7 @@ def main():
     parser.add_argument("--setup", action="store_true", help="Set up API credentials")
     parser.add_argument("--list-zones", action="store_true", help="List available Cloudflare zones")
     parser.add_argument("--apply-rules", action="store_true", help="Apply WAF rules to selected zones")
+    parser.add_argument("--restore", action="store_true", help="Restore a backup of WAF rules")
     parser.add_argument("--clear", action="store_true", help="Delete stored credentials")
 
     args = parser.parse_args()
@@ -157,6 +193,13 @@ def main():
             selected_zone_ids = [zones[num.strip()] for num in selection if num.strip() in zones]
             for zone_id in selected_zone_ids:
                 apply_waf_rules(zone_id)
+    elif args.restore:
+        zones = list_zones()
+        if zones:
+            selection = input("Enter the numbers of the zones to restore backup (comma-separated): ").split(",")
+            selected_zone_ids = [zones[num.strip()] for num in selection if num.strip() in zones]
+            for zone_id in selected_zone_ids:
+                restore_waf_rules(zone_id)
     elif args.clear:
         delete_credentials()
     else:
