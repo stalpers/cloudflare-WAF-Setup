@@ -19,9 +19,17 @@ python cloudflare_waf.py --list-zones
 ``` 
    
 3. **Apply WAF rules to selected zones**
+A backup of the existing rule set is stored in backup.json
 
 ```sh
 python cloudflare_waf.py --apply-rules
+```
+
+4. **Restore backup**
+Previous rules can be restored in case of problems with the new rule set
+
+```sh
+python cloudflare_waf.py --restore
 ```
 
 4. **Delete stored credentials**
