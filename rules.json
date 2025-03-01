@@ -1,0 +1,27 @@
+[
+    {
+        "description": "Good Bots Allow",
+        "expression": "(cf.client.bot) or (cf.verified_bot_category in {\"Search Engine Crawler\" \"Search Engine Optimization\" \"Monitoring & Analytics\" \"Advertising & Marketing\" \"Page Preview\" \"Academic Research\" \"Security\" \"Accessibility\" \"Webhooks\" \"Feed Fetcher\"})",
+        "action": "skip",
+        "action_parameters": {
+            "ruleset": "current",
+            "phases": ["http_ratelimit", "http_request_sbfm", "http_request_firewall_managed"],
+            "products": ["uaBlock", "zoneLockdown", "waf", "rateLimit", "bic", "hot", "securityLevel"]
+        }
+    },
+    {
+        "description": "MC Aggressive Crawlers",
+        "expression": "(http.user_agent contains \"yandex\") or (http.user_agent contains \"sogou\") or (http.user_agent contains \"semrush\") or (http.user_agent contains \"ahrefs\") or (http.user_agent contains \"baidu\") or (http.user_agent contains \"python-requests\")",
+        "action": "managed_challenge"
+    },
+    {
+        "description": "MC VPNs and WP Login",
+        "expression": "(ip.src.asnum in {60068 9009 16247 51332 212238 131199 22298 29761 62639 206150 210277 46562 8100 3214 206092 206074 206164 213074}) or (http.request.uri.path contains \"wp-login\")",
+        "action": "managed_challenge"
+    },
+    {
+        "description": "Block Web Hosts / WP Paths / TOR",
+        "expression": "(ip.src.asnum in {26496 31815 18450 398101 50673 7393 14061 205544 199610 21501 16125 51540 264649 39020 30083 35540 55293 36943 32244 6724 63949 7203 201924 30633 208046 36352 25264 32475 23033 32475 212047 32475 31898 210920 211252 16276 23470 136907 12876 210558 132203 61317 212238 37963 13238 2639 20473 63018 395954 19437 207990 27411 53667 27176 396507 206575 20454 51167 60781 62240 398493 206092 63023 213230 26347 20738 45102 24940 57523 8100 8560 6939 14178 46606 197540 397630 9009 11878}) or (http.request.uri.path contains \"xmlrpc\") or (http.request.uri.path contains \"wp-config\") or (http.request.uri.path contains \"wlwmanifest\") or (cf.verified_bot_category in {\"AI Crawler\" \"Other\"}) or (ip.src.country in {\"T1\"})",
+        "action": "block"
+    }
+]
