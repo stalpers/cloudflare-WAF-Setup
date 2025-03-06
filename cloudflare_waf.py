@@ -17,7 +17,10 @@ def load_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f:
             return json.load(f)
-    return {}
+    else:
+        print("Error: API credentials not found. Please run with --setup flag.")
+        exit(1)
+
 
 
 def save_config(data):
@@ -29,11 +32,15 @@ def save_config(data):
 def get_headers():
     """Return HTTP headers for Cloudflare API requests."""
     config = load_config()
-    return {
+    headers_old = {
         "X-Auth-Email": config.get("email"),
         "X-Auth-Key": config.get("api_key"),
         "Content-Type": "application/json",
     }
+    headers = {"Authorization": f"Bearer {config.get("api_key")}"}
+    print (f"Using headers: {headers}")
+    return headers
+
 
 
 def make_request(url, method="GET", data=None):
